@@ -9,7 +9,7 @@ import Control.Monad ( filterM )
 import Data.List ( isSuffixOf )
 import System.Info                    (os, arch)
 import System.FilePath
-  ( (</>), (<.>), takeExtension, splitExtension )
+  ( (</>), (<.>), takeExtension, splitExtension, takeDirectory )
 import System.Directory
   ( doesDirectoryExist
   , doesFileExist
@@ -23,14 +23,19 @@ import Data.Time
 
 import Config.Dyre.Params
 import Config.Dyre.Options
+import Data.Maybe (fromJust)
 
+data ConfigMethod =
+  HaskellFile { configFile :: FilePath }
+  | BuildScript { configFile :: FilePath }  
 
 -- | Data type to make it harder to confuse which path is which.
 data PathsConfig = PathsConfig
   { runningExecutable :: FilePath
   , customExecutable :: FilePath
-  , configFile :: FilePath
-  -- ^ Where Dyre looks for the custom configuration file.
+  , configMethod :: ConfigMethod
+  -- ^ Where Dyre looks for the custom configuration file, and how
+  -- it uses it.
   , libsDirectory :: FilePath
   -- ^ @<configDir>/libs@.  This directory gets added to the GHC
   -- include path during compilation, so use configurations can be
@@ -51,8 +56,8 @@ outputExecutable path =
 
 -- | Return a 'PathsConfig', which records the current binary, the custom
 --   binary, the config file, and the cache directory.
-getPaths :: Params c r -> IO (FilePath, FilePath, FilePath, FilePath, FilePath)
-getPaths params@Params{projectName = pName} = do
+getPaths :: Params c r -> IO (FilePath, FilePath, ConfigMethod, FilePath, FilePath)
+getPaths params@Params{projectName = pName, buildScriptName = bName} = do
     thisBinary <- getExecutablePath
     debugMode  <- getDebug
     cwd <- getCurrentDirectory
@@ -64,12 +69,17 @@ getPaths params@Params{projectName = pName} = do
                       (True,  _      ) -> return cwd
                       (False, Nothing) -> getUserConfigDir pName
                       (False, Just cd) -> cd
+    buildScirptExists <- case bName of
+      Just b -> doesFileExist (confDir </> b)
+      Nothing -> pure False
     let
       tempBinary =
         cacheDir' </> pName ++ "-" ++ os ++ "-" ++ arch <.> takeExtension thisBinary
-      configFile' = confDir </> pName ++ ".hs"
+      configMethod' = if buildScirptExists
+        then BuildScript $ confDir </> fromJust bName
+        else HaskellFile $ confDir </> pName ++ ".hs"
       libsDir = confDir </> "lib"
-    pure (thisBinary, tempBinary, configFile', cacheDir', libsDir)
+    pure (thisBinary, tempBinary, configMethod', cacheDir', libsDir)
 
 getPathsConfig :: Params cfg a -> IO PathsConfig
 getPathsConfig params = do
@@ -87,9 +97,12 @@ maybeModTime path = do
 
 checkFilesModified :: PathsConfig -> IO Bool
 checkFilesModified paths = do
-  confTime <- maybeModTime (configFile paths)
+  confTime <- maybeModTime (configFile $ configMethod paths)
   libFiles <- findHaskellFiles (libsDirectory paths)
-  libTimes <- traverse maybeModTime libFiles
+  srcFiles <- case configMethod paths of
+    HaskellFile _ -> pure []
+    BuildScript _ -> findHaskellFiles $ takeDirectory (libsDirectory paths)
+  libTimes <- traverse maybeModTime (libFiles ++ srcFiles)
   thisTime <- maybeModTime (runningExecutable paths)
   tempTime <- maybeModTime (customExecutable paths)
   pure $

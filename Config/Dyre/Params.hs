@@ -21,6 +21,10 @@ data Params cfgType a = Params
     --   recompilation, for testing purposes.
     , configDir    :: Maybe (IO FilePath)
     -- ^ The directory to look for a configuration file in.
+    , buildScriptName :: Maybe String
+    -- ^ @<configDir>/<buildScriptName>@. The name of the build script
+    -- in the @configDir@. Setting this to @Nothing@ will disable the
+    -- build script feature.
     , cacheDir     :: Maybe (IO FilePath)
     -- ^ The directory to store build files in, including the final
     --   generated executable.

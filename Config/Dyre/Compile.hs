@@ -18,7 +18,7 @@ import System.Directory  ( getCurrentDirectory, doesFileExist
                          , createDirectoryIfMissing
                          , renameFile, removeFile )
 
-import Config.Dyre.Paths ( PathsConfig(..), getPathsConfig, outputExecutable )
+import Config.Dyre.Paths ( PathsConfig(..), getPathsConfig, outputExecutable, ConfigMethod (..) )
 import Config.Dyre.Params ( Params(..) )
 
 -- | Return the path to the error file.
@@ -47,33 +47,39 @@ customCompile params@Params{statusOut = output} = do
     let
       tempBinary = customExecutable paths
       outFile = outputExecutable tempBinary
-      configFile' = configFile paths
+      configMethod' = configMethod paths
       cacheDir' = cacheDirectory paths
       libsDir = libsDirectory paths
 
-    output $ "Configuration '" ++ configFile' ++  "' changed. Recompiling."
+    output $ "Configuration '" ++ configFile configMethod' ++  "' changed. Recompiling."
     createDirectoryIfMissing True cacheDir'
 
     -- Compile occurs in here
     errFile <- getErrorPath params
     result <- withFile errFile WriteMode $ \errHandle -> do
-        flags <- makeFlags params configFile' outFile cacheDir' libsDir
-        stackYaml <- do
-          let stackYamlPath = takeDirectory configFile' </> "stack.yaml"
-          stackYamlExists <- doesFileExist stackYamlPath
-          if stackYamlExists
-            then return $ Just stackYamlPath
-            else return Nothing
+        case configMethod' of
+          HaskellFile configFile' -> do
+            flags <- makeFlags params configFile' outFile cacheDir' libsDir
+            stackYaml <- do
+              let stackYamlPath = takeDirectory configFile' </> "stack.yaml"
+              stackYamlExists <- doesFileExist stackYamlPath
+              if stackYamlExists
+                then return $ Just stackYamlPath
+                else return Nothing
 
-        hc' <- lookupEnv "HC"
-        nix_ghc <- lookupEnv "NIX_GHC"
-        let hc = fromMaybe "ghc" (hc' <|> nix_ghc)
-        ghcProc <- maybe (runProcess hc flags (Just cacheDir') Nothing
-                              Nothing Nothing (Just errHandle))
-                         (\stackYaml' -> runProcess "stack" ("ghc" : "--stack-yaml" : stackYaml' : "--" : flags)
-                              Nothing Nothing Nothing Nothing (Just errHandle))
-                         stackYaml
-        waitForProcess ghcProc
+            hc' <- lookupEnv "HC"
+            nix_ghc <- lookupEnv "NIX_GHC"
+            let hc = fromMaybe "ghc" (hc' <|> nix_ghc)
+            ghcProc <- maybe (runProcess hc flags (Just cacheDir') Nothing
+                                  Nothing Nothing (Just errHandle))
+                             (\stackYaml' -> runProcess "stack" ("ghc" : "--stack-yaml" : stackYaml' : "--" : flags)
+                                  Nothing Nothing Nothing Nothing (Just errHandle))
+                             stackYaml
+            waitForProcess ghcProc
+          BuildScript script -> do
+            buildProc <- runProcess script [outFile] (Just (takeDirectory script))
+                             Nothing Nothing Nothing (Just errHandle)
+            waitForProcess buildProc
 
     case result of
       ExitSuccess -> do

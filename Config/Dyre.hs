@@ -199,7 +199,7 @@ import Config.Dyre.Options ( getForceReconf, getDenyReconf
                            , withDyreOptions )
 import Config.Dyre.Paths
   ( getPathsConfig, customExecutable, runningExecutable, configFile
-  , checkFilesModified
+  , checkFilesModified, PathsConfig (configMethod)
   )
 
 -- | A set of reasonable defaults for configuring Dyre. The fields that
@@ -214,6 +214,7 @@ defaultParams = Params
     { projectName  = undefined
     , configCheck  = True
     , configDir    = Nothing
+    , buildScriptName = Just "build"
     , cacheDir     = Nothing
     , realMain     = undefined
     , showError    = undefined
@@ -259,7 +260,7 @@ wrapMain params cfg = withDyreOptions params $
         let tempBinary = customExecutable paths
             thisBinary = runningExecutable paths
 
-        confExists <- doesFileExist (configFile paths)
+        confExists <- doesFileExist (configFile $ configMethod paths)
 
         denyReconf  <- getDenyReconf
         forceReconf <- getForceReconf
